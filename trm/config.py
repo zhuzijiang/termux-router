@@ -230,6 +230,25 @@ class Config:
         return copy.deepcopy(self.data)
 
 
+def flatten_keys(node: Optional[Dict[str, Any]] = None) -> set:
+    """把配置树展平成 ``{"a.b.c", ...}`` 集合。
+
+    CLI 和面板 API 都用它来校验用户传入的配置键：
+    拼错一个字母就静默失效是配置类软件最烦人的问题，直接在入口拒绝更好。
+    """
+    out: set = set()
+
+    def walk(prefix: str, value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                walk(f"{prefix}.{key}" if prefix else key, child)
+        else:
+            out.add(prefix)
+
+    walk("", DEFAULTS if node is None else node)
+    return out
+
+
 def validate(cfg: Config) -> List[str]:
     """返回问题列表（空列表代表没问题）。只做能确定的检查，不猜。"""
     problems: List[str] = []

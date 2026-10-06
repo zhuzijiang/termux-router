@@ -325,6 +325,62 @@ class TestShaperPlan(unittest.TestCase):
         self.assertEqual(stats["1:30"]["bytes"], 100)
 
 
+class TestLocalAddresses(unittest.TestCase):
+    class FakeRunner:
+        """只实现 run()，用来喂一段假的 ip 输出。"""
+
+        def __init__(self, output: str, code: int = 0):
+            self.output = output
+            self.code = code
+            self.history = []
+
+        def which(self, name):
+            return "/system/bin/ip"
+
+        def run(self, cmd, **kwargs):
+            self.history.append(cmd)
+
+            class R:
+                ok = True
+                code = 0
+                out = self.output
+                err = ""
+                lines = staticmethod(lambda: [l for l in self.output.splitlines() if l.strip()])
+
+            return R()
+
+    IP_OUTPUT = (
+        "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever\n"
+        "2: rmnet_data1    inet 10.27.204.100/29 brd 10.27.204.103 scope global rmnet_data1\n"
+        "3: wlan0    inet 192.168.1.99/24 brd 192.168.1.255 scope global wlan0\n"
+    )
+
+    def test_parses_all_addresses(self):
+        got = net.local_ipv4(self.FakeRunner(self.IP_OUTPUT))
+        self.assertEqual(got, [("lo", "127.0.0.1"), ("rmnet_data1", "10.27.204.100"),
+                               ("wlan0", "192.168.1.99")])
+
+    def test_empty_output(self):
+        self.assertEqual(net.local_ipv4(self.FakeRunner("")), [])
+
+    def test_no_ip_command(self):
+        class NoIp:
+            def which(self, name):
+                return None
+
+            def run(self, cmd, **kwargs):
+                raise AssertionError("没有 ip 命令时不该执行命令")
+
+        self.assertEqual(net.local_ipv4(NoIp()), [])
+
+    def test_is_private_ip(self):
+        for addr in ("10.0.0.1", "192.168.1.1", "172.16.0.1", "100.64.0.1"):
+            self.assertTrue(net.is_private_ip(addr), addr)
+        for addr in ("8.8.8.8", "1.1.1.1", "172.32.0.1", "100.128.0.1"):
+            self.assertFalse(net.is_private_ip(addr), addr)
+        self.assertFalse(net.is_private_ip("garbage"))
+
+
 class TestBackendSelection(unittest.TestCase):
     def test_selects_iptables_when_usable(self):
         class C:

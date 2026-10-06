@@ -125,6 +125,19 @@ class TestConfig(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_flatten_keys_lists_every_leaf(self):
+        keys = config.flatten_keys()
+        self.assertIn("lan.subnet", keys)
+        self.assertIn("dns.upstream", keys)
+        self.assertIn("web.token", keys)
+        self.assertIn("netfilter.mss_clamp", keys)
+        # 不含中间节点
+        self.assertNotIn("lan", keys)
+        self.assertNotIn("dns", keys)
+
+    def test_flatten_keys_concrete_tree(self):
+        self.assertEqual(config.flatten_keys({"a": {"b": 1, "c": {"d": 2}}}), {"a.b", "a.c.d"})
+
     def test_validate_catches_real_problems(self):
         cfg = config.Config()
         self.assertEqual(config.validate(cfg), [], "默认配置应当没问题")

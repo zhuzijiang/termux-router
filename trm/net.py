@@ -355,6 +355,33 @@ def counters_readable(iface: str, root: str = "/sys/class/net") -> bool:
     return os.access(Path(root) / iface / "statistics" / "rx_bytes", os.R_OK)
 
 
+def local_ipv4(runner: Runner, ip_cmd: Optional[str] = None) -> List[Tuple[str, str]]:
+    """列出本机所有 IPv4 地址，返回 ``[(接口名, 地址)]``。
+
+    用途：`trm token` 要告诉用户"其他设备该访问哪个地址"。
+    与其让人自己去翻 IP，不如直接给出可点的链接。
+    """
+    cmd = ip_cmd or runner.which("ip")
+    if not cmd:
+        return []
+    res = runner.run([cmd, "-o", "-4", "addr", "show"], timeout=8)
+    found: List[Tuple[str, str]] = []
+    for line in res.lines():
+        cols = line.split()
+        if len(cols) < 4 or "inet" not in cols:
+            continue
+        try:
+            index = cols.index("inet")
+        except ValueError:
+            continue
+        if index + 1 >= len(cols):
+            continue
+        addr = cols[index + 1].split("/")[0]
+        iface = cols[1].rstrip(":")
+        found.append((iface, addr))
+    return found
+
+
 def parse_conntrack_line(line: str) -> Optional[Dict[str, Any]]:
     """解析 ``/proc/net/nf_conntrack`` 的一行。
 
@@ -437,7 +464,12 @@ def aggregate_lan_traffic(entries: List[Dict[str, Any]], lan_iface: str = "") ->
     return stats
 
 
-def _is_private(ip: str) -> bool:
+def is_private_ip(ip: str) -> bool:
+    """是否是 RFC1918 / CGNAT 私有地址。
+
+    注意：手机移动数据的 ``10.x`` 地址**也是**私有的，但它属于运营商内网，
+    其他设备访问不到。判断"别的设备能不能连"必须结合接口名，见 cli.cmd_token。
+    """
     parts = ip.split(".")
     if len(parts) != 4:
         return False
@@ -454,3 +486,7 @@ def _is_private(ip: str) -> bool:
     if a == 100 and 64 <= b <= 127:  # CGNAT，运营商热点常用
         return True
     return False
+
+
+# 旧名字保留，避免外部引用失效
+_is_private = is_private_ip

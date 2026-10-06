@@ -502,6 +502,11 @@ def hotspot_controller(cfg, caps, runner):
     return HotspotController(cfg, caps, runner)
 
 
+def _known_config_keys() -> set:
+    """可配置项的合法键集合（与面板 API 共用同一份规则）。"""
+    return config_mod.flatten_keys()
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     cfg = config_mod.Config.load()
     if args.config_action == "show":
@@ -515,11 +520,12 @@ def cmd_config(args: argparse.Namespace) -> int:
             _print("" if value is None else str(value))
         return 0
     if args.config_action == "set":
-        try:
-            value = config_mod.coerce_scalar(args.value)
-        except Exception as exc:  # coerce 不会抛，但留一道保险
-            _print(_c(f"值解析失败: {exc}", "bad"))
+        known = _known_config_keys()
+        if args.key not in known:
+            _print(_c(f"未知配置项：{args.key}", "bad"))
+            _print(_c("用 trm config show 查看全部可配置项（拼错一个字母就会静默失效，所以这里直接拒绝）", "dim"))
             return 1
+        value = config_mod.coerce_scalar(args.value)
         cfg.set(args.key, value)
         problems = config_mod.validate(cfg)
         cfg.save()
@@ -541,15 +547,52 @@ def cmd_token(args: argparse.Namespace) -> int:
     cfg.save()
     host = str(cfg.get("web.host", "127.0.0.1"))
     port = int(cfg.get("web.port", 8080))
+    loopback_only = host in ("127.0.0.1", "localhost", "::1")
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+
     _print(_kv_table([
-        ("面板地址", f"http://{display_host}:{port}/"),
+        ("监听地址", f"{host}:{port}" + ("（仅本机）" if loopback_only else "（所有网卡）")),
         ("访问令牌", token),
-        ("监听地址", f"{host}:{port}"),
     ]))
-    if host in ("0.0.0.0", "::"):
-        _print()
-        _print(_c("面板监听在所有网卡上。局域网内任何设备只要拿到令牌就能改防火墙规则，请妥善保管。", "warn"))
+    _print()
+    _print(_c("免密直达链接（在浏览器打开即自动登录）：", "dim"))
+    _print(f"  手机本机          http://127.0.0.1:{port}/?token={token}")
+
+    if loopback_only:
+        _print(_c("  其他设备          访问不了：面板只监听本机", "warn"))
+        _print(_c("                   放开：trm config set web.host 0.0.0.0", "dim"))
+        _print(_c("                         trm down && trm up -d", "dim"))
+    else:
+        from .exec import Runner
+
+        runner = Runner()
+        cap = caps_mod.detect(runner, deep=False)
+        addresses = net.local_ipv4(runner, ip_cmd=cap.ip)
+        mobile_prefixes = ("rmnet", "ccmni", "wwan", "pdp", "clat")
+        shown = 0
+        for iface, addr in addresses:
+            if addr.startswith("127."):
+                continue
+            if iface.startswith(mobile_prefixes):
+                # 手机移动数据的 10.x 是运营商内网，别的设备连不上，必须说清楚
+                tag = "移动数据，其他设备访问不到"
+            elif net.is_private_ip(addr):
+                tag = "局域网，其他设备可用"
+            else:
+                tag = "公网地址，注意风险"
+            _print(f"  {iface:<16}  http://{addr}:{port}/?token={token}")
+            _print(_c(f"  {'':<16}  ↑ {tag}", "dim"))
+            shown += 1
+        if not shown:
+            _print(_c("  其他设备          读不到本机地址。手动查看：ip -o -4 addr show", "warn"))
+            _print(_c("                   手机若没开 WiFi，先打开 WiFi 连到同一局域网", "dim"))
+
+    _print()
+    if loopback_only:
+        _print(_c("提示：把令牌当路由器管理密码看待。", "dim"))
+    else:
+        _print(_c("提示：面板已在所有网卡监听，同一网络里拿到令牌的人都能改设置。", "warn"))
+        _print(_c("      改回仅本机：trm config set web.host 127.0.0.1 && trm down && trm up -d", "dim"))
     return 0
 
 

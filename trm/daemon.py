@@ -577,7 +577,7 @@ class RouterDaemon:
         key = str(payload.get("key", ""))
         if not key:
             return {"ok": False, "error": "缺少 key"}
-        if key not in _flatten_defaults():
+        if key not in config_mod.flatten_keys():
             return {"ok": False, "error": f"未知配置项 {key}"}
         value = payload.get("value")
         self.cfg.set(key, value)
@@ -597,21 +597,6 @@ class RouterDaemon:
             store.write_json(paths.state_dir() / "shaper.json", self.shaper_map.to_dict())
         except OSError as exc:
             self._log(f"保存限速映射失败: {exc}")
-
-
-def _flatten_defaults() -> set:
-    """把 DEFAULTS 展平成 ``a.b.c`` 形式，用于校验配置键。"""
-    out: set = set()
-
-    def walk(prefix: str, node: Any) -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                walk(f"{prefix}.{key}" if prefix else key, value)
-        else:
-            out.add(prefix)
-
-    walk("", config_mod.DEFAULTS)
-    return out
 
 
 def read_pidfile() -> Optional[Dict[str, Any]]:
