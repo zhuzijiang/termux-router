@@ -165,6 +165,8 @@ class Config:
         except OSError:
             pass
         os.replace(tmp, self.path)
+        # root 写的配置要交还给 Termux uid：否则普通身份跑 trm config set 会权限不足
+        paths.adopt(self.path)
 
     def ensure_token(self) -> str:
         """确保存在面板访问令牌（空则生成）。"""

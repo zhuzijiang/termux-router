@@ -253,7 +253,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         except OSError as exc:
             _print(_c(f"后台化失败（{exc}），改为前台运行", "warn"))
     cfg.save()
-    daemon = daemon_mod.RouterDaemon(cfg, dry_run=args.dry_run, web_only=args.web_only)
+    daemon = daemon_mod.RouterDaemon(cfg, dry_run=args.dry_run, web_only=args.web_only,
+                                     force=args.force)
     if not daemon.start():
         return 1
     if args.daemon:
@@ -270,6 +271,22 @@ def cmd_down(args: argparse.Namespace) -> int:
     pid = int(info["pid"])
     try:
         os.kill(pid, signal.SIGTERM)
+    except PermissionError:
+        # 常见情况：守护进程是 sudo 起的（属主 root），普通身份杀不掉。
+        # 先尝试自动借 su 提权，不行再明确告诉用户该敲什么。
+        _print(_c("没有权限停止该进程（它由 root 启动），尝试用 su 提权…", "warn"))
+        from .exec import Runner
+
+        su = Runner().which("su")
+        if su:
+            res = Runner(timeout=20).run([su, "-c", f"kill -TERM {pid}"])
+            if not res.ok:
+                _print(_c(f"自动提权失败：{res.text or res.code}", "bad"))
+                _print(_c("请手动执行：sudo trm down", "bad"))
+                return 1
+        else:
+            _print(_c("找不到 su。请手动执行：sudo trm down", "bad"))
+            return 1
     except OSError as exc:
         _print(_c(f"发送信号失败: {exc}", "bad"))
         return 1
@@ -278,7 +295,7 @@ def cmd_down(args: argparse.Namespace) -> int:
             _print(_c("已停止。", "ok"))
             return 0
         time.sleep(0.2)
-    _print(_c("等待超时，进程可能仍在退出中（规则会在退出前清理）。", "warn"))
+    _print(_c("等待超时。如果守护进程是 root 启动的，请用：sudo trm down", "warn"))
     return 1
 
 
@@ -625,6 +642,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-d", "--daemon", action="store_true", help="后台运行")
     p.add_argument("--dry-run", action="store_true", help="只打印将要执行的命令，不真的执行")
     p.add_argument("--web-only", action="store_true", help="只启动管理面板，不下发规则")
+    p.add_argument("--force", action="store_true",
+                   help="接口探测不到时也强行下发规则（默认会拒绝并说明原因）")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="停止守护进程并清理本项目下发的全部规则")

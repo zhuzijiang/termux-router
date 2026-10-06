@@ -196,6 +196,19 @@ class Caps:
                 return name
         return None
 
+    def unknown_interfaces(self, pairs) -> List[Tuple[str, str]]:
+        """挑出"配置里写了、但当前实际不存在"的接口。
+
+        用途：在真正下发 iptables 规则之前拦一道。iptables **不校验接口是否存在**，
+        给一个不存在的接口名下发 `-i ap0` 会"成功"，但规则永远匹配不到流量，
+        表现为"规则都在、就是不通"，极难排查。宁可在启动时直接拒绝。
+
+        接口列表读不到时返回空列表（无法判断，不做无根据的拦截）。
+        """
+        if not self.interfaces:
+            return []
+        return [(role, iface) for role, iface in pairs if iface and iface not in self.interfaces]
+
     def missing_for_router(self) -> List[str]:
         """还差什么才能变成真正的软路由。"""
         gaps: List[str] = []
@@ -205,10 +218,17 @@ class Caps:
                 "无法操作 Android 内核的 netfilter，装了 iptables 也没用。请直接在 Termux 里运行本项目。"
             )
         if not self.real_root:
-            gaps.append(
-                f"没有真正的 root（真实 uid={self.real_uid}，run-as 身份是 Termux 应用）。"
-                "需要 KernelSU / Magisk 提供 su，并用 tsu 或 sudo 提权运行。"
-            )
+            if self.su:
+                # 这种情况最常见也最容易让人困惑：设备已经 root 了，只是没用它运行
+                gaps.append(
+                    f"本机有 su（{self.su}），但当前不是用它运行的（真实 uid={self.real_uid}）。"
+                    f"直接改用：sudo trm up -d（或 tsu -c 'trm up -d'）"
+                )
+            else:
+                gaps.append(
+                    f"没有真正的 root（真实 uid={self.real_uid}，run-as 身份是 Termux 应用），"
+                    "也没找到 su。需要 KernelSU / Magisk 提供 root。"
+                )
         if self.real_root and not self.iptables and not self.nft:
             gaps.append("找不到 iptables 或 nft。Termux 里执行：pkg install root-repo && pkg install iptables")
         if self.real_root and not self.netfilter_ok:
@@ -225,8 +245,11 @@ class Caps:
         if self.is_termux:
             missing = []
             if not self.real_root:
-                out.append("先刷 KernelSU / Magisk 拿到 root，然后在 Termux 里安装 tsu：pkg install tsu")
-                out.append("拿到 root 后用 sudo trm up（或 tsu -c 'trm up'）启动")
+                if self.su:
+                    out.append(f"本机已有 su（{self.su}），只是没用它运行：sudo trm up -d")
+                else:
+                    out.append("先刷 KernelSU / Magisk 拿到 root，然后在 Termux 里安装 tsu：pkg install tsu")
+                    out.append("拿到 root 后用 sudo trm up（或 tsu -c 'trm up'）启动")
             if not self.iptables and not self.nft:
                 missing.append("iptables")
             if not self.tc:

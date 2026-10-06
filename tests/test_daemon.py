@@ -15,11 +15,14 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from trm import config as config_mod, daemon as daemon_mod, paths, web  # noqa: E402
+from trm import caps as caps_mod, config as config_mod, daemon as daemon_mod, paths, web  # noqa: E402
+from trm import net as net_mod  # noqa: E402
+from trm.exec import Runner  # noqa: E402
 
 FRONTEND_KEYS = {"app", "caps", "plane", "counters", "dhcp", "dns", "clients",
                  "client_summary", "hotspot", "shaper", "phone", "web", "config", "logs"}
@@ -225,6 +228,103 @@ class TestDaemonActions(DaemonTestCase):
         result = self.daemon.handle_action("hotspot.start", {})
         self.assertFalse(result["ok"])
         self.assertIn("ssid", (result.get("reason") or "").lower() + str(result))
+
+
+class TestInterfacePreflight(DaemonTestCase):
+    """接口不存在时必须拒绝下发规则。
+
+    iptables 不校验接口名，给不存在的 ap0 下规则会"成功"但永不匹配，
+    表现为"规则都在、就是不通"——第一次用 root 的人最容易卡在这里。
+    这里用一个 dry-run 的 Runner 兜底，保证即使防线失效也不会真的改系统。
+    """
+
+    def _daemon_with_interfaces(self, interfaces, *, force=False, dry_run=False):
+        # 关掉 DHCP/DNS：本类只测"规则下发前的接口拦截"，
+        # 不能让测试真的去 bind 67/53（在真机上那会启动真实服务）
+        self.cfg.set("dhcp.enabled", False)
+        self.cfg.set("dns.enabled", False)
+        daemon = daemon_mod.RouterDaemon(self.cfg, dry_run=dry_run, force=force)
+        daemon.started_at = 1.0
+        daemon.caps = caps_mod.detect(self.daemon.runner, deep=False)
+        daemon.caps.real_root = True
+        daemon.caps.netfilter_ok = True
+        daemon.caps.interfaces = interfaces
+        # 真 Runner 换成 dry-run 的：即使防线失效也不会真的改内核
+        daemon.runner = Runner(dry_run=True)
+        daemon.plane_ctx = net_mod.PlaneContext(lan_iface="ap0", wan_iface="rmnet_data0",
+                                                backend="iptables")
+        # 屏蔽 sysctl 写入（真机上会真的改 ip_forward，测试不该有这个副作用）
+        patcher = mock.patch.object(net_mod, "apply_sysctl", lambda *a, **k: [])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return daemon
+
+    def test_skips_when_lan_iface_missing(self):
+        daemon = self._daemon_with_interfaces(["lo", "rmnet_data0"])
+        daemon._bring_up_plane()
+        self.assertFalse(daemon.plane_applied)
+        self.assertEqual(daemon.runner.history, [], "接口不存在时不该执行任何命令")
+        self.assertTrue(any("拒绝下发" in p for p in daemon.boot_problems))
+        self.assertTrue(any("热点" in p for p in daemon.boot_problems), "提示要说清去开热点")
+
+    def test_skips_when_wan_iface_missing(self):
+        daemon = self._daemon_with_interfaces(["lo", "ap0"])
+        daemon._bring_up_plane()
+        self.assertFalse(daemon.plane_applied)
+        self.assertTrue(any("外网" in p for p in daemon.boot_problems))
+
+    def test_force_overrides_guard(self):
+        daemon = self._daemon_with_interfaces(["lo", "rmnet_data0"], force=True)
+        daemon._bring_up_plane()
+        self.assertTrue(daemon.plane_applied, "--force 应当允许强行下发")
+        self.assertTrue(len(daemon.runner.history) > 0)
+
+    def test_proceeds_when_interfaces_exist(self):
+        daemon = self._daemon_with_interfaces(["lo", "ap0", "rmnet_data0"])
+        daemon._bring_up_plane()
+        self.assertTrue(daemon.plane_applied)
+        self.assertTrue(len(daemon.runner.history) > 0, "接口存在时应正常下发")
+        self.assertEqual(daemon.boot_problems, [])
+
+    def test_dry_run_previews_even_without_iface(self):
+        """dry-run 的用途就是"让我看看全部命令"，不该被这道防线挡住。
+
+        注意 dry-run 下命令是写进日志的（而不是走 Runner 执行），
+        所以这里断言日志，不能断言 runner.history。
+        """
+        daemon = self._daemon_with_interfaces(["lo"], dry_run=True)
+        daemon._bring_up_plane()
+        self.assertTrue(daemon.plane_applied, "dry-run 下应完整预演")
+        preview = [line for line in daemon.logs.all() if "[dry-run]" in line]
+        self.assertTrue(preview, "dry-run 应把每条命令打进日志")
+        self.assertTrue(any("MASQUERADE" in line for line in preview),
+                        "预演里必须包含关键的 NAT 规则")
+
+
+class TestBindFailureHints(DaemonTestCase):
+    """端口被占用时要给出能照抄的处理命令。
+
+    真机上 Android 热点自带 dnsmasq，67/53 很可能被系统占着——这是
+    rooted 用户必然会遇到的情况，一句"启动失败"帮不上任何忙。
+    """
+
+    def test_dhcp_port_in_use_suggests_disabling_our_dhcp(self):
+        hint = daemon_mod.bind_failure_hint("dhcp", "绑定 0.0.0.0:67 失败: [Errno 98] Address already in use")
+        self.assertIn("dhcp.enabled false", hint)
+        self.assertIn("trm down", hint)
+
+    def test_dns_port_in_use_suggests_alt_port_and_hijack(self):
+        hint = daemon_mod.bind_failure_hint("dns", "UDP 绑定 0.0.0.0:53 失败: [Errno 98] Address already in use")
+        self.assertIn("dns.port 5353", hint)
+        self.assertIn("hijack_dns true", hint)
+
+    def test_permission_denied_gets_no_port_hint(self):
+        """权限问题给"换端口"的建议是误导，必须区分开。"""
+        self.assertEqual(
+            daemon_mod.bind_failure_hint("dns", "绑定失败: [Errno 13] Permission denied"), "")
+
+    def test_unknown_error_gets_no_hint(self):
+        self.assertEqual(daemon_mod.bind_failure_hint("dns", "something odd"), "")
 
 
 class TestDaemonStatusHelpers(DaemonTestCase):

@@ -40,11 +40,13 @@ RESTART_REQUIRED = {
 
 class RouterDaemon:
     def __init__(self, cfg: config_mod.Config, dry_run: bool = False,
-                 log_to_file: bool = True, web_only: bool = False) -> None:
+                 log_to_file: bool = True, web_only: bool = False,
+                 force: bool = False) -> None:
         self.cfg = cfg
         self.dry_run = dry_run
         self.log_to_file = log_to_file
         self.web_only = web_only
+        self.force = force
         self.logs = store.RingBuffer(LOG_RING_SIZE)
         self.started_at = 0.0
         self.runner = Runner(dry_run=dry_run, timeout=15.0, log=self._trace)
@@ -142,14 +144,26 @@ class RouterDaemon:
         if not ctx.lan_iface or not ctx.wan_iface:
             self._log(f"接口未识别（内网={ctx.lan_iface} 外网={ctx.wan_iface}），"
                       "请在配置里显式指定 lan.iface / wan.iface")
-        else:
-            # 猜出来的接口名如果根本不存在，规则会下发失败。宁可在启动时就喊出来。
-            known = self.caps.interfaces if self.caps else []
-            for role, iface in (("内网", ctx.lan_iface), ("外网", ctx.wan_iface)):
-                if known and iface not in known:
-                    self._log(f"警告：{role}接口 {iface} 不在当前接口列表中"
-                              f"（实际有：{', '.join(known) or '无'}）。"
-                              f"{'热点可能还没开——先开启系统热点，然后 trm down && trm up' if role == '内网' else '请检查 wan.iface 配置'}")
+
+        # ---- 下发前的拦截：接口不存在就别下规则 ----
+        # iptables 不校验接口名：给不存在的 ap0 下 `-i ap0` 会"成功"，
+        # 但规则永远匹配不到流量，表现为"规则都在、就是不通"，极难排查。
+        # 对第一次用 root 的人来说这是最坑的失败方式，所以宁可拒绝启动。
+        unknown = (self.caps.unknown_interfaces([("内网", ctx.lan_iface), ("外网", ctx.wan_iface)])
+                   if self.caps else [])
+        if unknown and not (self.dry_run or self.force):
+            detail = "、".join(f"{role}接口 {iface}" for role, iface in unknown)
+            hint = ("热点还没开？先在系统设置里打开热点，然后：sudo trm down && sudo trm up -d"
+                    if any(role == "内网" for role, _ in unknown)
+                    else "请检查 wan.iface 配置是否写错")
+            message = (f"拒绝下发数据面规则：{detail} 当前不存在"
+                       f"（实际接口：{', '.join(self.caps.interfaces) if self.caps.interfaces else '无'}）。{hint}")
+            self._log(message)
+            self.boot_problems.append(message)
+            return
+        if unknown and self.force:
+            self._log("警告：--force 已指定，接口不存在也照常下发（大概率不生效）")
+
         pairs, steps = net.plan_enable(ctx)
         self.sysctl_failures = net.apply_sysctl(pairs) if not self.dry_run else []
         if self.dry_run:
@@ -178,6 +192,9 @@ class RouterDaemon:
                 self.dhcp_server = server
             else:
                 self._log(f"DHCP 启动失败: {server.last_error}")
+                hint = bind_failure_hint("dhcp", server.last_error)
+                if hint:
+                    self._log(hint)
 
         if self.cfg.get("dns.enabled"):
             proxy = dnsd.build_proxy(self.cfg, log=self._log)
@@ -193,6 +210,9 @@ class RouterDaemon:
                 self.dns_proxy = proxy
             else:
                 self._log(f"DNS 启动失败: {proxy.last_error}")
+                hint = bind_failure_hint("dns", proxy.last_error)
+                if hint:
+                    self._log(hint)
 
     def _setup_shaper(self) -> None:
         assert self.plane_ctx is not None
@@ -597,6 +617,29 @@ class RouterDaemon:
             store.write_json(paths.state_dir() / "shaper.json", self.shaper_map.to_dict())
         except OSError as exc:
             self._log(f"保存限速映射失败: {exc}")
+
+
+def bind_failure_hint(service: str, error: str) -> str:
+    """端口被占用时给出**可直接照抄**的处理建议。
+
+    为什么专门做这个：Android 的热点功能自己跑着一份 dnsmasq 来提供 DHCP 和 DNS，
+    所以在一台正常开启热点的 rooted 手机上，67 和 53 这两个端口**很可能是被系统占着的**。
+    这不是配置错误，而是必须换个分工方式，用户如果不知道这一点会卡很久。
+    """
+    text = error.lower()
+    in_use = ("address already in use" in text or "errno 98" in text or "eaddrinuse" in text)
+    if not in_use:
+        return ""
+    if service == "dhcp":
+        return ("建议：让 Android 自带的热点继续负责 DHCP，本项目不必重复提供。执行：\n"
+                "        trm config set dhcp.enabled false\n"
+                "        sudo trm down && sudo trm up -d\n"
+                "      限速、DNS 拦截、流量统计这些系统做不到的功能不受影响。")
+    return ("端口 53 被占用了（通常是 Android 热点自带的 dnsmasq）。换端口 + 把内网 DNS 劫持过来：\n"
+            "        trm config set dns.port 5353\n"
+            "        trm config set netfilter.hijack_dns true\n"
+            "        sudo trm down && sudo trm up -d\n"
+            "      劫持会把内网所有 53 端口的查询重定向到我们的 5353，客户端无需改设置。")
 
 
 def read_pidfile() -> Optional[Dict[str, Any]]:

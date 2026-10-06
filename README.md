@@ -105,23 +105,87 @@ bash install.sh --uninstall         # 卸载
 
 ## 快速开始
 
-### 有 root
+### 有 root（完整流程）
+
+**第 0 步：确认 root 真的可用**（这一步别跳，能省掉后面所有困惑）
 
 ```bash
-sudo trm up -d        # 启动：sysctl 转发 + NAT 规则 + DHCP + DNS + 面板
-sudo trm status       # 查看状态
-sudo trm clients      # 看谁在连我的热点、用了多少流量
-sudo trm limit 192.168.43.55 4096 1024   # 给某台设备限速（下行 4M / 上行 1M）
-sudo trm down         # 停止，并清理本项目下发的全部规则
+sudo id            # 必须输出 uid=0(root)
+sudo trm doctor    # 期望看到：真 root 是 / netfilter 可用 是 / 工作模式 软路由模式
 ```
 
-**启动前先开系统热点**（本项目不抢 Android 的 AP 控制权，理由见下）：
+如果 `trm doctor` 说"本机有 su（…），但当前不是用它运行的" —— 那就只是**没用 sudo**，
+`sudo trm up -d` 即可。如果它说找不到 su，那这台设备其实没 root。
+
+**第 1 步：先在系统设置里打开热点**
 
 ```
 设置 → 连接与共享 → 便携式热点 → 打开
 ```
 
-> 如果热点命令在你的 ROM 上能用，也可以：`sudo trm hotspot start`
+本项目不抢 Android 的 AP 控制权（理由见"设计取舍"）。**热点必须先开**，
+因为 iptables 不校验接口名：给一个不存在的 `ap0` 下发规则会"成功"，
+但规则永远匹配不到流量，表现为"规则都在、就是不通"。所以本项目会在启动时
+**直接拒绝**并告诉你原因，而不是留下一堆看着正常却没用的规则。
+（确实需要强行下发时用 `sudo trm up -d --force`。）
+
+**第 2 步：确认接口名**
+
+```bash
+ip -o -4 addr show          # 找热点接口，通常是 ap0 / softap0 / wlan1
+ip route show default       # 找外网接口，通常是 rmnet_data0 / rmnet_data1
+```
+
+猜得不准就显式写进配置：
+
+```bash
+trm config set lan.iface ap0
+trm config set wan.iface rmnet_data1
+```
+
+**第 3 步：启动并使用**
+
+```bash
+sudo trm up -d                            # sysctl 转发 + NAT + DHCP + DNS + 面板
+sudo trm status
+sudo trm clients                          # 看谁在连、用了多少流量
+sudo trm limit 192.168.43.55 4096 1024    # 下行 4Mbps / 上行 1Mbps
+sudo trm name 192.168.43.55 客厅电视
+trm token                                 # 面板链接（普通身份也能读，见下）
+sudo trm down                             # 停止并清理本项目下发的全部规则
+```
+
+> **`sudo` 和普通身份看到的是同一份配置。** 这一点是特意处理的：
+> root 的 `$HOME` 通常不是 Termux 家目录，而且 root 创建的文件普通用户读不了。
+> 所以本项目固定使用 Termux 家目录下的 `~/.trm`，并在以 root 写入后把文件属主
+> 交还给 Termux 应用 uid。于是 `sudo trm up -d` 之后，`trm status`、`trm token`、
+> `trm config set` 在普通身份下都照常工作。
+
+### 有 root 时最常见的两个小问题
+
+**1. DHCP 起不来（端口 67 被占）**
+
+Android 的热点功能自己跑着一份 dnsmasq 来提供 DHCP 和 DNS，所以在一台正常开着
+热点的手机上，67 和 53 很可能**已经被系统占着**。这不是配置错误，而是需要换个分工：
+
+```bash
+trm config set dhcp.enabled false          # 让系统的 dnsmasq 继续管 DHCP
+sudo trm down && sudo trm up -d
+```
+
+限速、DNS 拦截、流量统计这些系统做不到的功能**不受影响**。
+
+**2. DNS 起不来（端口 53 被占）**
+
+换个端口，然后把内网所有 53 查询劫持过来 —— 客户端不需要改任何设置：
+
+```bash
+trm config set dns.port 5353
+trm config set netfilter.hijack_dns true
+sudo trm down && sudo trm up -d
+```
+
+这两条建议在日志里会自动出现（见 `daemon.bind_failure_hint`），不用去猜。
 
 ### 没有 root（监控模式）
 

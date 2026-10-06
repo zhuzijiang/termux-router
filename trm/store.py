@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from . import paths
+
 PathLike = Union[str, Path]
 
 
@@ -35,6 +37,8 @@ def write_json(path: PathLike, data: Any) -> None:
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, p)
+    # 以 root 写出的文件要交还给 Termux uid，否则普通身份读不了也改不了
+    paths.adopt(p)
 
 
 def read_text(path: PathLike, default: str = "") -> str:
@@ -48,8 +52,11 @@ def read_text(path: PathLike, default: str = "") -> str:
 def append_line(path: PathLike, line: str) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    existed = p.exists()
     with p.open("a", encoding="utf-8") as fh:
         fh.write(line.rstrip("\n") + "\n")
+    if not existed:
+        paths.adopt(p)
 
 
 class RingBuffer:

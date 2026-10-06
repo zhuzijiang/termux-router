@@ -211,6 +211,20 @@ class TestCaps(unittest.TestCase):
         c = caps.Caps(interfaces=["lo", "ap0", "rmnet_data1"], default_iface=None)
         self.assertEqual(c.wan_iface("auto"), "rmnet_data1")
 
+    def test_unknown_interfaces_flags_missing(self):
+        c = caps.Caps(interfaces=["lo", "rmnet_data0"])
+        self.assertEqual(c.unknown_interfaces([("内网", "ap0"), ("外网", "rmnet_data0")]),
+                         [("内网", "ap0")])
+        self.assertEqual(c.unknown_interfaces([("内网", "lo"), ("外网", "rmnet_data0")]), [])
+
+    def test_unknown_interfaces_silent_when_list_unavailable(self):
+        """读不到接口列表时不能乱拦——无法判断就不做无根据的拒绝。"""
+        self.assertEqual(caps.Caps(interfaces=[]).unknown_interfaces([("内网", "ap0")]), [])
+
+    def test_unknown_interfaces_ignores_empty_names(self):
+        c = caps.Caps(interfaces=["lo"])
+        self.assertEqual(c.unknown_interfaces([("内网", None), ("外网", "")]), [])
+
     def test_doctor_report_shape(self):
         rows = caps.doctor_report(caps.Caps(real_uid=0, real_root=True))
         self.assertTrue(all(len(r) == 3 for r in rows))
