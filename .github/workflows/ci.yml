@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 单元测试 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 覆盖 Termux 可能带的版本范围。本项目只用标准库，所以低版本也能跑。
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 语法检查（全部模块与测试）
+        run: python -m compileall -q trm tests run_tests.py
+
+      - name: 跑单元测试
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: 确认没有第三方依赖
+        run: |
+          # 本项目的核心承诺是"零依赖"：源码里不允许出现 import 第三方包。
+          python - <<'PY'
+          import ast, pathlib, sys
+          stdlib = set(sys.stdlib_module_names)
+          local = {"trm"}
+          offenders = []
+          for path in pathlib.Path("trm").rglob("*.py"):
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in ast.walk(tree):
+                  names = []
+                  if isinstance(node, ast.Import):
+                      names = [a.name.split(".")[0] for a in node.names]
+                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                      names = [node.module.split(".")[0]]
+                  for name in names:
+                      if name not in stdlib and name not in local:
+                          offenders.append(f"{path}: {name}")
+          if offenders:
+              print("发现第三方依赖（违反零依赖原则）:")
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          print("零第三方依赖检查通过")
+          PY
+
+  shellcheck:
+    name: shell 脚本检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 语法检查安装脚本与启动器
+        run: |
+          bash -n install.sh
+          sh -n bin/trm
+          echo "shell 语法检查通过"
+
+  webui:
+    name: 面板前端检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查内联 JS 语法
+        run: |
+          python - <<'PY'
+          import pathlib, re
+          html = pathlib.Path("trm/webui/index.html").read_text(encoding="utf-8")
+          blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
+          assert blocks, "index.html 里没有找到 <script> 块"
+          pathlib.Path("webui_inline.js").write_text("\n".join(blocks), encoding="utf-8")
+          print(f"提取到 {len(blocks)} 个 script 块")
+          PY
+          node --check webui_inline.js
+          echo "面板 JS 语法检查通过"
+
+      - name: 确认面板不引用任何外部资源
+        run: |
+          # 面板必须能离线加载：不允许 CDN、外链字体、外链图片。
+          if grep -nE 'src="https?://|href="https?://' trm/webui/index.html; then
+            echo "面板引用了外部资源，这会让离线/断网环境下打不开"
+            exit 1
+          fi
+          echo "面板无外部依赖"

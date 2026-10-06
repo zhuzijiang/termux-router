@@ -1,0 +1,41 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# termux-router 的命令行包装器。
+#
+# 作用：无论从哪个目录调用、仓库被放在哪里，都能正确以模块方式运行，
+# 不需要用户去配 PYTHONPATH。
+#
+# 之所以用 `python3 -c` 而不是 `PYTHONPATH=... python3 -m trm`：
+# 后者在部分 Termux 环境下会被 shell 的环境变量传递方式影响，
+# 而这种写法是显式、可预测的。
+set -eu
+
+self_path=$0
+case $self_path in
+  */*) ;;
+  *) self_path=$(command -v -- "$self_path") ;;
+esac
+
+# 解析符号链接：安装脚本会在 $PREFIX/bin/trm 放一个软链，
+# 不解析的话 dirname 会算成 $PREFIX/bin，从而找不到仓库目录。
+while [ -L "$self_path" ]; do
+  link=$(readlink -- "$self_path")
+  case $link in
+    /*) self_path=$link ;;
+    *) self_path=$(dirname -- "$self_path")/$link ;;
+  esac
+done
+
+bin_dir=$(CDPATH= cd -- "$(dirname -- "$self_path")" && pwd)
+root_dir=$(dirname -- "$bin_dir")
+
+py=${TRM_PYTHON:-python3}
+if ! command -v "$py" >/dev/null 2>&1; then
+  echo "termux-router: 找不到 python3，请先执行 pkg install python" >&2
+  exit 127
+fi
+
+exec "$py" -c 'import sys
+root = sys.argv.pop(1)
+sys.path.insert(0, root)
+from trm.cli import main
+sys.exit(main())' "$root_dir" "$@"

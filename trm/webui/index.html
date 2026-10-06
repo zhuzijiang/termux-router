@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex, nofollow">
+<title>termux-router 控制台</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#131a22; --panel2:#1a232e; --line:#26313d;
+    --fg:#e6edf3; --dim:#8b98a5; --accent:#3fb950; --warn:#d29922; --bad:#f85149; --info:#58a6ff;
+    --radius:12px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","PingFang SC",sans-serif;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  header{
+    position:sticky; top:0; z-index:10; background:rgba(11,15,20,.92);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+    padding:10px 12px calc(10px + env(safe-area-inset-top)) 12px;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  header h1{font-size:16px; margin:0; font-weight:600; letter-spacing:.2px}
+  .badge{
+    font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--dim); white-space:nowrap
+  }
+  .badge.ok{color:var(--accent); border-color:#1d4025}
+  .badge.warn{color:var(--warn); border-color:#4a3a12}
+  .badge.bad{color:var(--bad); border-color:#4d1f1c}
+  .spacer{flex:1}
+  button{
+    font:inherit; font-size:14px; color:var(--fg); background:var(--panel2);
+    border:1px solid var(--line); border-radius:10px; padding:9px 13px; cursor:pointer;
+    min-height:40px
+  }
+  button:active{transform:scale(.98)}
+  button.primary{background:#1f6feb; border-color:#1f6feb; color:#fff}
+  button.danger{background:#3d1512; border-color:#6b2721; color:#ffb4ae}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  input,select{
+    font:inherit; font-size:14px; color:var(--fg); background:var(--bg);
+    border:1px solid var(--line); border-radius:9px; padding:9px 10px; width:100%; min-height:40px
+  }
+  nav{display:flex; gap:6px; padding:10px 12px 0; overflow-x:auto}
+  nav button{flex:0 0 auto; border-radius:999px; padding:7px 15px; min-height:36px; font-size:14px}
+  nav button.active{background:var(--panel2); border-color:var(--accent); color:var(--accent)}
+  main{padding:12px; max-width:900px; margin:0 auto}
+  section{display:none} section.active{display:block}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:13px; margin-bottom:12px}
+  .card h2{margin:0 0 10px; font-size:14px; color:var(--dim); font-weight:600; letter-spacing:.4px; text-transform:uppercase}
+  .row{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 0; border-bottom:1px dashed #202a35}
+  .row:last-child{border-bottom:none}
+  .row .k{color:var(--dim); font-size:14px}
+  .row .v{text-align:right; font-variant-numeric:tabular-nums; word-break:break-all}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px}
+  .stat{background:var(--panel2); border-radius:10px; padding:10px}
+  .stat .n{font-size:19px; font-weight:600; font-variant-numeric:tabular-nums}
+  .stat .l{font-size:12px; color:var(--dim); margin-top:2px}
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--dim); margin-right:6px; vertical-align:middle}
+  .dot.on{background:var(--accent); box-shadow:0 0 6px var(--accent)}
+  .dot.off{background:#3a4550}
+  .dot.unk{background:var(--warn)}
+  ul.list{margin:0; padding:0; list-style:none; max-height:340px; overflow:auto}
+  ul.list li{padding:7px 0; border-bottom:1px dashed #202a35; font-size:13px; display:flex; gap:8px; align-items:baseline}
+  ul.list li:last-child{border-bottom:none}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px}
+  .mono{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:9px;
+        white-space:pre-wrap; word-break:break-all; max-height:280px; overflow:auto; color:var(--dim)}
+  .muted{color:var(--dim); font-size:13px}
+  .actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+  .overlay{position:fixed; inset:0; background:rgba(5,8,11,.94); display:flex; align-items:center;
+           justify-content:center; padding:18px; z-index:100}
+  .overlay.hidden{display:none}
+  .overlay .card{max-width:420px; width:100%}
+  #toast{position:fixed; left:50%; transform:translateX(-50%); bottom:22px; z-index:200;
+         background:var(--panel2); border:1px solid var(--line); color:var(--fg);
+         padding:10px 15px; border-radius:999px; font-size:13.5px; opacity:0; transition:opacity .2s;
+         pointer-events:none; max-width:92vw; text-align:center}
+  #toast.show{opacity:1}
+  .warnbox{background:#2a1f08; border:1px solid #4a3a12; border-radius:10px; padding:11px; margin-bottom:10px}
+  .warnbox.bad{background:#2a100e; border-color:#4d1f1c}
+  .warnbox ul{margin:7px 0 0; padding-left:18px} .warnbox li{margin:4px 0; font-size:13.5px}
+  .bar{height:6px; background:var(--panel2); border-radius:3px; overflow:hidden; margin-top:6px}
+  .bar i{display:block; height:100%; background:var(--accent)}
+  .cli{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin-bottom:12px}
+  .cli .top{display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap}
+  .cli .title{font-weight:600}
+  .cli .lim{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+  .cli .lim label{flex:1; min-width:120px; font-size:12px; color:var(--dim)}
+  .cli .lim input{margin-top:4px}
+  label.field{display:block; margin-bottom:11px; font-size:13px; color:var(--dim)}
+  label.field input,label.field select{margin-top:5px; color:var(--fg)}
+</style>
+</head>
+<body>
+
+<div id="login" class="overlay hidden">
+  <div class="card">
+    <h2>需要访问令牌</h2>
+    <p class="muted">令牌在设备上执行 <code>trm token</code> 获取。它会被保存在本机浏览器里，不会发送到别处。</p>
+    <input id="tokenInput" type="password" placeholder="粘贴令牌" autocomplete="off">
+    <div class="actions">
+      <button class="primary" onclick="saveToken()">进入面板</button>
+    </div>
+    <p id="loginErr" class="muted" style="color:var(--bad)"></p>
+  </div>
+</div>
+
+<header>
+  <h1>termux-router</h1>
+  <span id="modeBadge" class="badge">读取中…</span>
+  <span id="uptimeBadge" class="badge"></span>
+  <span class="spacer"></span>
+  <button class="ghost" id="refreshBtn" onclick="toggleAuto()">自动刷新：开</button>
+</header>
+
+<nav>
+  <button class="active" data-tab="overview" onclick="showTab('overview')">概览</button>
+  <button data-tab="clients" onclick="showTab('clients')">设备</button>
+  <button data-tab="dns" onclick="showTab('dns')">DNS</button>
+  <button data-tab="settings" onclick="showTab('settings')">设置</button>
+</nav>
+
+<main>
+  <section id="tab-overview" class="active">
+    <div id="gaps"></div>
+    <div class="card">
+      <h2>运行状态</h2>
+      <div class="grid" id="overviewStats"></div>
+      <div id="overviewRows"></div>
+    </div>
+    <div class="card">
+      <h2>热点（AP）</h2>
+      <div id="hotspotRows"></div>
+      <div class="actions">
+        <button class="primary" onclick="act('hotspot.start')">开启热点</button>
+        <button onclick="act('hotspot.stop')">关闭热点</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>手机自身</h2>
+      <div id="phoneRows"></div>
+    </div>
+  </section>
+
+  <section id="tab-clients">
+    <div class="chips" id="clientChips"></div>
+    <div id="clientList"></div>
+  </section>
+
+  <section id="tab-dns">
+    <div class="card">
+      <h2>DNS 概况</h2>
+      <div class="grid" id="dnsStats"></div>
+      <div id="dnsRows"></div>
+      <div class="actions">
+        <button onclick="act('dns.cache.clear')">清空缓存</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>手动拦截</h2>
+      <label class="field">域名（支持 example.com 与 *.example.com）
+        <input id="blockDomain" placeholder="ads.example.com" autocomplete="off">
+      </label>
+      <div class="actions">
+        <button class="primary" onclick="blockDomain()">加入拦截</button>
+        <button onclick="unblockDomain()">解除拦截</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>最近查询</h2>
+      <ul class="list" id="dnsLog"></ul>
+    </div>
+  </section>
+
+  <section id="tab-settings">
+    <div class="card">
+      <h2>网络</h2>
+      <label class="field">内网网段（热点侧）<input id="cfg_lan_subnet" placeholder="192.168.43.0/24"></label>
+      <label class="field">网关地址<input id="cfg_lan_gateway" placeholder="192.168.43.1"></label>
+      <label class="field">DHCP 地址池起<input id="cfg_lan_pool_start" placeholder="192.168.43.50"></label>
+      <label class="field">DHCP 地址池止<input id="cfg_lan_pool_end" placeholder="192.168.43.200"></label>
+      <label class="field">外网接口（auto 或 rmnet_data0）<input id="cfg_wan_iface" placeholder="auto"></label>
+      <label class="field">内网接口（auto 或 ap0）<input id="cfg_lan_iface" placeholder="auto"></label>
+    </div>
+    <div class="card">
+      <h2>DNS</h2>
+      <label class="field">上游服务器（逗号分隔）<input id="cfg_dns_upstream" placeholder="1.1.1.1, 8.8.8.8"></label>
+      <label class="field">拦截命中时返回<input id="cfg_dns_block_response" placeholder="0.0.0.0 或 nxdomain"></label>
+      <label class="field">上游超时（秒）<input id="cfg_dns_query_timeout" placeholder="3"></label>
+    </div>
+    <div class="card">
+      <h2>限速与数据面</h2>
+      <label class="field">启用 tc 限速（需 root）<select id="cfg_shaper_enabled"><option value="false">关闭</option><option value="true">开启</option></select></label>
+      <label class="field">默认下行限速 kbps（0=不限）<input id="cfg_shaper_default_down_kbps" placeholder="0"></label>
+      <label class="field">默认上行限速 kbps（0=不限）<input id="cfg_shaper_default_up_kbps" placeholder="0"></label>
+      <label class="field">MSS 钳制（修 PMTU 黑洞，建议开）<select id="cfg_netfilter_mss_clamp"><option value="true">开启</option><option value="false">关闭</option></select></label>
+      <label class="field">强制劫持局域网 53 端口到本机 DNS<select id="cfg_netfilter_hijack_dns"><option value="false">关闭</option><option value="true">开启</option></select></label>
+    </div>
+    <div class="card">
+      <h2>热点控制命令（因 ROM 而异，可留空用默认）</h2>
+      <label class="field">开启命令模板<input id="cfg_hotspot_start_cmd" placeholder="cmd wifi start-softap {ssid} wpa2 {passphrase}"></label>
+      <label class="field">关闭命令模板<input id="cfg_hotspot_stop_cmd" placeholder="cmd wifi stop-softap"></label>
+      <label class="field">热点名称 SSID<input id="cfg_hotspot_ssid" placeholder="MyRouter"></label>
+      <label class="field">热点密码<input id="cfg_hotspot_passphrase" placeholder="至少 8 位" autocomplete="new-password"></label>
+    </div>
+    <div class="card">
+      <h2>管理面板</h2>
+      <label class="field">监听地址（127.0.0.1 仅本机；0.0.0.0 允许局域网）<input id="cfg_web_host" placeholder="127.0.0.1"></label>
+      <label class="field">端口<input id="cfg_web_port" placeholder="8080"></label>
+      <label class="field">访问令牌<input id="cfg_web_token" autocomplete="off"></label>
+    </div>
+    <div class="actions" style="margin-bottom:12px">
+      <button class="primary" onclick="saveConfig()">保存设置</button>
+      <button onclick="loadConfig()">重新读取</button>
+    </div>
+    <div class="card">
+      <h2>最近日志</h2>
+      <div class="mono" id="logBox">（暂无）</div>
+    </div>
+    <div class="card">
+      <h2>危险操作</h2>
+      <div class="actions">
+        <button class="danger" onclick="act('net.down')">清除全部规则（关闭路由）</button>
+        <button class="danger" onclick="act('daemon.stop')">停止服务</button>
+      </div>
+      <p class="muted" style="margin-bottom:0">“清除全部规则”只删除本项目自建的 TRM_* 链，不动系统其它防火墙规则。</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+var TOKEN_KEY = "trm_token";
+var state = { data: null, auto: true, timer: null, tab: "overview" };
+
+// 动作名 → HTTP 路由。不能简单地把点换成斜杠：
+// 客户端相关接口是复数且有路径参数（/api/clients/<ip>/limit）。
+var ROUTES = {
+  "net.up": "/api/net/up",
+  "net.down": "/api/net/down",
+  "hotspot.start": "/api/hotspot/start",
+  "hotspot.stop": "/api/hotspot/stop",
+  "dns.cache.clear": "/api/dns/cache/clear",
+  "dns.block": "/api/dns/block",
+  "dns.unblock": "/api/dns/unblock",
+  "daemon.stop": "/api/daemon/stop",
+  "config.set": "/api/config",
+  "client.limit": "/api/clients/{ip}/limit",
+  "client.unlimit": "/api/clients/{ip}/unlimit",
+  "client.name": "/api/clients/{ip}/name",
+  "client.forget": "/api/clients/{ip}/forget"
+};
+
+function routeFor(action, body){
+  var path = ROUTES[action];
+  if (!path) path = "/api/" + action.replace(/\./g, "/");
+  if (path.indexOf("{ip}") !== -1){ path = path.replace("{ip}", encodeURIComponent((body && body.ip) || "")); }
+  return path;
+}
+
+function $(id){ return document.getElementById(id); }
+function esc(s){
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function token(){ return localStorage.getItem(TOKEN_KEY) || ""; }
+
+function toast(msg){
+  var t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove("show"); }, 2600);
+}
+function fmtBytes(n){
+  n = Number(n) || 0;
+  var u = ["B","KB","MB","GB","TB"], i = 0;
+  while (n >= 1024 && i < u.length - 1){ n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n < 10 ? 2 : 1)) + " " + u[i];
+}
+function fmtDur(s){
+  s = Math.max(0, parseInt(s || 0, 10));
+  if (s < 60) return s + " 秒";
+  if (s < 3600) return Math.floor(s/60) + " 分" + (s%60) + " 秒";
+  var h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  if (h < 24) return h + " 时" + m + " 分";
+  return Math.floor(h/24) + " 天" + (h%24) + " 时";
+}
+
+function api(path, opts){
+  opts = opts || {};
+  var headers = { "X-TRM-Token": token() };
+  if (opts.body){ headers["Content-Type"] = "application/json"; }
+  return fetch(path, {
+    method: opts.method || "GET",
+    headers: headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(function(r){
+    if (r.status === 401){ showLogin("令牌无效或已变更，请重新输入"); throw new Error("unauthorized"); }
+    return r.json();
+  });
+}
+
+function showLogin(msg){
+  $("login").classList.remove("hidden");
+  if (msg) $("loginErr").textContent = msg;
+}
+function saveToken(){
+  localStorage.setItem(TOKEN_KEY, $("tokenInput").value.trim());
+  $("login").classList.add("hidden");
+  refresh();
+}
+
+function toggleAuto(){
+  state.auto = !state.auto;
+  $("refreshBtn").textContent = "自动刷新：" + (state.auto ? "开" : "关");
+  schedule();
+}
+function schedule(){
+  if (state.timer) clearTimeout(state.timer);
+  if (!state.auto) return;
+  var ms = (state.data && state.data.config && state.data.config.web && state.data.config.web.refresh_ms) || 2000;
+  state.timer = setTimeout(refresh, Math.max(1000, ms));
+}
+
+function refresh(){
+  return api("/api/status").then(function(res){
+    if (!res.ok){ toast(res.error || "读取失败"); return; }
+    state.data = res.data;
+    render(res.data);
+  }).catch(function(e){
+    if (String(e.message) !== "unauthorized") toast("连接失败：" + e.message);
+  }).then(schedule);
+}
+
+function showTab(name){
+  state.tab = name;
+  var i, tabs = document.querySelectorAll("nav button");
+  for (i = 0; i < tabs.length; i++){ tabs[i].classList.toggle("active", tabs[i].dataset.tab === name); }
+  var secs = document.querySelectorAll("main section");
+  for (i = 0; i < secs.length; i++){ secs[i].classList.toggle("active", secs[i].id === "tab-" + name); }
+}
+
+function row(k, v){
+  return '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + v + '</span></div>';
+}
+function badge(text, kind){ return '<span class="badge ' + (kind || "") + '">' + esc(text) + '</span>'; }
+
+function render(d){
+  var mode = d.app.mode;
+  var kind = mode === "router" ? "ok" : (mode === "partial" ? "warn" : "bad");
+  $("modeBadge").className = "badge " + kind;
+  $("modeBadge").textContent = d.caps.mode_label;
+  $("uptimeBadge").textContent = "已运行 " + fmtDur(d.app.uptime) + (d.app.dry_run ? " · dry-run" : "");
+
+  renderGaps(d);
+  renderOverview(d);
+  renderHotspot(d);
+  renderPhone(d);
+  renderClients(d);
+  renderDns(d);
+  renderSettings(d);
+}
+
+function renderGaps(d){
+  var gaps = (d.caps.missing || []).slice(), html = "";
+  if (d.caps.mode === "router"){
+    html = '<div class="warnbox" style="background:#0f2417;border-color:#1d4025">' +
+      '<strong>软路由已就绪</strong>：内核转发与 NAT 已下发，转发性能由内核决定（接近线速）。</div>';
+  } else {
+    html = '<div class="warnbox bad"><strong>当前无法作为真正的路由器工作</strong><ul>';
+    for (var i = 0; i < gaps.length; i++){ html += "<li>" + esc(gaps[i]) + "</li>"; }
+    html += "</ul>";
+    if ((d.caps.suggestions || []).length){
+      html += '<div class="muted" style="margin-top:8px">下一步：</div><ul>';
+      for (var j = 0; j < d.caps.suggestions.length; j++){ html += "<li><code>" + esc(d.caps.suggestions[j]) + "</code></li>"; }
+      html += "</ul>";
+    }
+    html += "</div>";
+  }
+  $("gaps").innerHTML = html;
+}
+
+function renderOverview(d){
+  var wan = d.counters.wan || {}, lan = d.counters.lan || {};
+  var dhcp = d.dhcp || {}, dns = d.dns || {};
+  var cache = dns.cache || {};
+  function flow(counter, label){
+    // 读不到就必须说"读不到"，显示 0 是在骗人（PRoot 下 /sys/class/net 被屏蔽）
+    if (counter.available === false){ return { n: "不可读", l: label + "（无权限）" }; }
+    return { n: fmtBytes(counter.rx || 0) + " / " + fmtBytes(counter.tx || 0), l: label + " 收/发" };
+  }
+  var stats = [
+    flow(wan, "外网"),
+    flow(lan, "内网"),
+    { n: (cache.hit_rate !== undefined ? Math.round(cache.hit_rate * 100) + "%" : "—"), l: "DNS 缓存命中率" },
+    { n: (dns.stats && dns.stats.blocked) || 0, l: "已拦截查询" },
+    { n: (d.client_summary && d.client_summary.online) || 0, l: "在线设备" },
+    { n: (d.client_summary && d.client_summary.total) || 0, l: "已知设备" }
+  ];
+  var html = "";
+  for (var i = 0; i < stats.length; i++){
+    html += '<div class="stat"><div class="n">' + esc(stats[i].n) + '</div><div class="l">' + esc(stats[i].l) + "</div></div>";
+  }
+  $("overviewStats").innerHTML = html;
+
+  var plane = d.plane || {};
+  var rows = "";
+  rows += row("工作模式", badge(d.caps.mode_label, d.caps.mode === "router" ? "ok" : "bad"));
+  rows += row("数据面后端", esc(plane.backend || "无"));
+  rows += row("规则已下发", plane.applied ? badge("是", "ok") : badge("否", "bad"));
+  rows += row("内网接口 / 外网接口", esc((plane.lan_iface || "?") + " → " + (plane.wan_iface || "?")) +
+      (plane.wan_iface_guessed || plane.lan_iface_guessed ? ' <span class="badge warn">推测</span>' : ""));
+  rows += row("内核转发 (ip_forward)", plane.forwarding || "未启用");
+  rows += row("DHCP 服务", (dhcp.running ? badge("运行中", "ok") : badge("未运行", "bad")) +
+      ' <span class="muted">' + esc((dhcp.pool_used || 0) + "/" + (dhcp.pool_size || 0) + " 地址已用") + "</span>");
+  rows += row("DNS 服务", (dns.running ? badge("运行中", "ok") : badge("未运行", "bad")) +
+      ' <span class="muted">' + esc("缓存 " + (cache.size || 0) + "/" + (cache.capacity || 0)) + "</span>");
+  rows += row("限速", d.shaper && d.shaper.enabled ? badge("已启用", "ok") : badge("未启用", ""));
+  rows += row("管理面板", '<a class="mono" style="color:var(--info)" href="' + esc(d.web.url) + '">' + esc(d.web.url) + "</a>");
+  rows += row("真实 uid / getuid()", esc(d.caps.real_uid + " / " + d.caps.fake_uid));
+  rows += row("iptables / tc", esc((d.caps.tools.iptables || "无") + " / " + (d.caps.tools.tc || "无")));
+  rows += row("netfilter 可用", d.caps.netfilter_ok ? badge("是", "ok") : badge("否", "bad"));
+  $("overviewRows").innerHTML = rows;
+}
+
+function renderHotspot(d){
+  var h = d.hotspot || {};
+  var stateMap = { on: ["已开启", "ok"], off: ["已关闭", ""], unknown: ["无法探测", "warn"] };
+  var s = stateMap[h.state] || stateMap.unknown;
+  var html = "";
+  html += row("状态", badge(s[0], s[1]));
+  html += row("热点接口", esc(h.ap_iface || "未识别"));
+  html += row("探测方式", esc(h.command || "—"));
+  if (h.detail) html += row("详情", esc(h.detail));
+  if ((h.guidance || []).length){
+    html += '<div class="muted" style="margin-top:9px">手动开启步骤：</div><ul class="list">';
+    for (var i = 0; i < h.guidance.length; i++){ html += "<li>" + esc(h.guidance[i]) + "</li>"; }
+    html += "</ul>";
+  }
+  $("hotspotRows").innerHTML = html;
+}
+
+function renderPhone(d){
+  var w = d.phone && d.phone.wifi || {}, b = d.phone && d.phone.battery || {};
+  var html = "";
+  if (w.available){
+    html += row("WiFi SSID", esc(w.ssid || "—"));
+    html += row("本机 IP", esc(w.ip || "—"));
+    html += row("信号强度 (RSSI)", esc((w.rssi === undefined || w.rssi === null ? "—" : w.rssi + " dBm")));
+    html += row("连接速率", esc((w.link_speed_mbps || "—") + " Mbps"));
+    html += row("频率", esc((w.frequency_mhz || "—") + " MHz"));
+  } else {
+    html += '<div class="muted">' + esc(w.hint || w.error || "Termux:API 不可用，读不到 WiFi 信息") + "</div>";
+  }
+  if (b.available){
+    html += row("电量", esc((b.percentage === undefined ? "—" : b.percentage + "%") +
+        (b.plugged && b.plugged !== "UNPLUGGED" ? "（充电中）" : "")));
+    html += row("电池温度", esc((b.temperature === undefined ? "—" : b.temperature + " °C")));
+  }
+  $("phoneRows").innerHTML = html || '<div class="muted">没有可显示的手机状态</div>';
+}
+
+function renderClients(d){
+  var list = d.clients || [], sum = d.client_summary || {};
+  $("clientChips").innerHTML =
+    badge("共 " + (sum.total || 0) + " 台", "") +
+    badge("在线 " + (sum.online || 0), "ok") +
+    (sum.unknown ? badge("状态未知 " + sum.unknown, "warn") : "") +
+    badge("限速中 " + (sum.limited || 0), "") +
+    badge("↑ " + fmtBytes(sum.up || 0) + " / ↓ " + fmtBytes(sum.down || 0), "");
+
+  if (!list.length){
+    $("clientList").innerHTML = '<div class="warnbox">' +
+      "<strong>没有设备数据</strong><ul>" +
+      "<li>设备列表来自 DHCP 租约 + ARP 表 + 连接跟踪，这三样都需要 root 才能读写。</li>" +
+      "<li>当前为" + esc(d.caps.mode_label) + "，因此这里不显示任何编造的数据。</li>" +
+      "<li>拿到 root 后执行 <code>sudo trm up</code>，设备会自动出现在这里。</li>" +
+      "</ul></div>";
+    return;
+  }
+
+  var html = "";
+  for (var i = 0; i < list.length; i++){
+    var c = list[i];
+    var dotCls = c.online === true ? "on" : (c.online === false ? "off" : "unk");
+    var dotTitle = c.online === true ? "在线" : (c.online === false ? "离线" : "状态未知");
+    html += '<div class="cli">';
+    html += '<div class="top"><div><span class="dot ' + dotCls + '" title="' + dotTitle + '"></span>' +
+            '<span class="title">' + esc(c.label) + "</span></div>" +
+            '<div class="muted mono">' + esc(c.ip) + "</div></div>";
+    html += '<div class="row"><span class="k">MAC</span><span class="v mono">' + esc(c.mac || "—") + "</span></div>";
+    html += '<div class="row"><span class="k">流量</span><span class="v">↑ ' + fmtBytes(c.up) + " / ↓ " + fmtBytes(c.down) +
+            ' <span class="muted">(' + esc(c.conns) + " 条连接)</span></span></div>";
+    html += '<div class="row"><span class="k">租约剩余</span><span class="v">' + (c.static ? "固定租约" : fmtDur(c.lease_remaining)) + "</span></div>";
+    html += '<div class="row"><span class="k">限速</span><span class="v">' +
+            (c.limited ? "↓ " + esc(c.down_kbps) + " kbps / ↑ " + esc(c.up_kbps) + " kbps" : "未限速") + "</span></div>";
+    html += '<div class="lim">' +
+      '<label>下行 kbps（0=不限）<input id="down_' + esc(c.ip) + '" type="number" inputmode="numeric" value="' + esc(c.down_kbps) + '"></label>' +
+      '<label>上行 kbps（0=不限）<input id="up_' + esc(c.ip) + '" type="number" inputmode="numeric" value="' + esc(c.up_kbps) + '"></label>' +
+      '<label>备注名<input id="name_' + esc(c.ip) + '" value="' + esc(c.name) + '" placeholder="客厅电视"></label>' +
+      "</div>";
+    html += '<div class="actions">' +
+      '<button class="primary" onclick="applyLimit(\'' + esc(c.ip) + '\')">应用限速</button>' +
+      '<button onclick="unlimit(\'' + esc(c.ip) + '\')">解除限速</button>' +
+      '<button onclick="renameClient(\'' + esc(c.ip) + '\')">保存备注</button>' +
+      '<button class="danger" onclick="forgetClient(\'' + esc(c.ip) + '\')">踢掉租约</button>' +
+      "</div></div>";
+  }
+  $("clientList").innerHTML = html;
+}
+
+function renderDns(d){
+  var dns = d.dns || {}, st = dns.stats || {}, cache = dns.cache || {}, bl = dns.blocklist || {};
+  $("dnsStats").innerHTML =
+    '<div class="stat"><div class="n">' + esc(st.queries || 0) + '</div><div class="l">总查询</div></div>' +
+    '<div class="stat"><div class="n">' + esc(st.cached || 0) + '</div><div class="l">缓存命中</div></div>' +
+    '<div class="stat"><div class="n">' + esc(st.blocked || 0) + '</div><div class="l">已拦截</div></div>' +
+    '<div class="stat"><div class="n">' + esc(st.forwarded || 0) + '</div><div class="l">转发上游</div></div>' +
+    '<div class="stat"><div class="n">' + esc(st.errors || 0) + '</div><div class="l">错误</div></div>' +
+    '<div class="stat"><div class="n">' + esc(Math.round((cache.hit_rate || 0) * 100)) + '%</div><div class="l">命中率</div></div>';
+  var rows = "";
+  rows += row("监听", esc(dns.bind || "—"));
+  rows += row("上游", esc((dns.upstream || []).join(", ") || "未配置"));
+  rows += row("拦截规则", esc("精确 " + (bl.exact || 0) + " / 通配 " + (bl.wildcard || 0) + " / 放行 " + (bl.allow || 0)));
+  $("dnsRows").innerHTML = rows;
+
+  var qs = dns.queries || [], html = "";
+  for (var i = 0; i < qs.length; i++){
+    var q = qs[i];
+    var kind = q.action === "blocked" ? "bad" : (q.action === "cache" ? "ok" : "");
+    html += "<li>" + badge(q.action, kind) + "<span>" + esc(q.name) + "</span>" +
+            '<span class="spacer" style="flex:1"></span><span class="muted mono">' +
+            esc(q.type + " · " + q.client + " · " + q.ms + "ms") + "</span></li>";
+  }
+  $("dnsLog").innerHTML = html || '<li class="muted">还没有查询记录</li>';
+}
+
+var CFG_FIELDS = [
+  "lan.subnet","lan.gateway","lan.pool_start","lan.pool_end","wan.iface","lan.iface",
+  "dns.upstream","dns.block_response","dns.query_timeout",
+  "shaper.enabled","shaper.default_down_kbps","shaper.default_up_kbps",
+  "netfilter.mss_clamp","netfilter.hijack_dns",
+  "hotspot.start_cmd","hotspot.stop_cmd","hotspot.ssid","hotspot.passphrase",
+  "web.host","web.port","web.token"
+];
+
+function renderSettings(d){
+  var cfg = d.config || {};
+  for (var i = 0; i < CFG_FIELDS.length; i++){
+    var key = CFG_FIELDS[i], el = $("cfg_" + key.replace(/\./g, "_"));
+    if (!el || document.activeElement === el) continue;
+    var val = cfg;
+    var parts = key.split(".");
+    for (var j = 0; j < parts.length && val !== undefined && val !== null; j++){ val = val[parts[j]]; }
+    if (Array.isArray(val)) val = val.join(", ");
+    if (val === undefined || val === null) val = "";
+    el.value = String(val);
+  }
+  var logs = (d.logs || []).join("\n");
+  var box = $("logBox");
+  box.textContent = logs || "（暂无）";
+  box.scrollTop = box.scrollHeight;
+}
+
+function loadConfig(){ refresh().then(function(){ toast("已重新读取"); }); }
+
+function collectEdits(){
+  var out = {};
+  for (var i = 0; i < CFG_FIELDS.length; i++){
+    var key = CFG_FIELDS[i], el = $("cfg_" + key.replace(/\./g, "_"));
+    if (!el) continue;
+    var val = el.value;
+    if (key === "dns.upstream"){
+      out[key] = val.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+    } else if (key === "shaper.enabled" || key === "netfilter.mss_clamp" || key === "netfilter.hijack_dns"){
+      out[key] = val === "true";
+    } else if (key.indexOf("port") !== -1 || key.indexOf("kbps") !== -1 || key === "dns.query_timeout"){
+      out[key] = val === "" ? 0 : Number(val);
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
+function saveConfig(){
+  var edits = collectEdits(), keys = Object.keys(edits), i = 0;
+  function step(){
+    if (i >= keys.length){
+      toast("已保存。" + (state.data && state.data.plane.applied ? "部分改动需要重启服务生效。" : ""));
+      refresh();
+      return;
+    }
+    var key = keys[i++];
+    api("/api/config", { method: "POST", body: { key: key, value: edits[key] } })
+      .then(step).catch(function(e){ toast("保存失败：" + e.message); });
+  }
+  step();
+}
+
+function applyLimit(ip){
+  var body = {
+    down_kbps: Number($("down_" + ip).value || 0),
+    up_kbps: Number($("up_" + ip).value || 0)
+  };
+  doAction("client.limit", body, ip);
+}
+function unlimit(ip){ doAction("client.unlimit", {}, ip); }
+function renameClient(ip){ doAction("client.name", { name: $("name_" + ip).value }, ip); }
+function forgetClient(ip){ doAction("client.forget", {}, ip); }
+function blockDomain(){ doAction("dns.block", { domain: $("blockDomain").value }, "域名"); }
+function unblockDomain(){ doAction("dns.unblock", { domain: $("blockDomain").value }, "域名"); }
+
+function doAction(action, extra, ip){
+  var body = extra || {};
+  if (ip) body.ip = ip;
+  act(action, body);
+}
+
+function act(action, body, quiet){
+  body = body || {};
+  return api(routeFor(action, body), { method: "POST", body: body })
+    .then(function(res){
+      if (!quiet) toast(res.ok === false ? (res.error || "操作失败") : (res.message || "完成"));
+      refresh();
+      return res;
+    }).catch(function(e){
+      if (!quiet) toast("失败：" + e.message);
+    });
+}
+
+document.addEventListener("visibilitychange", function(){
+  if (!document.hidden) refresh();
+});
+
+(function boot(){
+  if (!token()){ showLogin(""); } else { refresh(); }
+  api("/api/ping").catch(function(){});
+})();
+</script>
+</body>
+</html>
