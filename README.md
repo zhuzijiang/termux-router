@@ -44,10 +44,28 @@
 
 ## 安装
 
-### 一行拉取
+### 在另一台手机上直接拉取
+
+仓库是公开的，任何设备都能匿名克隆（不需要登录、不需要 token）：
+
+```bash
+# Termux 里一条命令搞定（会自动 clone + 安装）
+pkg install -y git python && \
+git clone https://github.com/zhuzijiang/termux-router.git && \
+cd termux-router && bash install.sh
+```
+
+只想先看看代码：
 
 ```bash
 git clone https://github.com/zhuzijiang/termux-router.git
+```
+
+浏览器打开：<https://github.com/zhuzijiang/termux-router>
+
+### 手动安装（本机已有代码）
+
+```bash
 cd termux-router
 bash install.sh
 ```
