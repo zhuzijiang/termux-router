@@ -42,8 +42,32 @@ jobs:
       - name: 语法检查安装脚本与启动器
         run: |
           bash -n install.sh
+          bash -n bootstrap.sh
           sh -n bin/trm
           echo "shell 语法检查通过"
+
+      - name: 检查 bootstrap.sh 的 dry-run 与拒绝逻辑
+        run: |
+          # dry-run 必须在任何环境都能跑（只打印，不做改动）
+          bash bootstrap.sh --dry-run | grep -q '将要执行的步骤'
+
+          # 非 Termux 环境必须拒绝，不能硬着头皮往下装
+          if PREFIX=/usr bash bootstrap.sh >/dev/null 2>&1; then
+            echo "非 Termux 环境竟然没有拒绝，这是错的"
+            exit 1
+          fi
+
+          # 危险参数必须在做任何动作之前就被拦下（脚本里会对该目录做 rm -rf）
+          mkdir -p /tmp/fakebin
+          printf '#!/bin/sh\nexit 0\n' > /tmp/fakebin/pkg
+          chmod +x /tmp/fakebin/pkg
+          if env -u PROOT_L2S_DIR -u container PATH=/tmp/fakebin:/usr/bin:/bin \
+               PREFIX=/data/data/com.termux/files/usr TRM_REPO_DIR=/etc \
+               bash bootstrap.sh >/dev/null 2>&1; then
+            echo "TRM_REPO_DIR 不在 HOME 内竟然没有被拦下，这是危险的"
+            exit 1
+          fi
+          echo "bootstrap 防护逻辑检查通过"
 
   webui:
     name: 面板前端检查

@@ -485,22 +485,32 @@ def cmd_dns(args: argparse.Namespace) -> int:
 
 
 def cmd_hotspot(args: argparse.Namespace) -> int:
+    """热点开关与状态。
+
+    刻意**不走守护进程**：这是一次性命令，脚本里（比如 bootstrap.sh）需要在
+    服务启动之前就能用。面板上的热点开关才会经过守护进程。
+    """
     cfg = config_mod.Config.load()
-    if args.hotspot_action == "start":
-        _require_daemon(cfg)
-        result = _api_call(cfg, "POST", "/api/hotspot/start", {})
-        _print(result.get("message") or ("已开启" if result.get("ok") else result.get("reason", "失败")))
-        return 0 if result.get("ok") else 1
-    if args.hotspot_action == "stop":
-        _require_daemon(cfg)
-        result = _api_call(cfg, "POST", "/api/hotspot/stop", {})
-        _print(result.get("message") or ("已关闭" if result.get("ok") else result.get("reason", "失败")))
-        return 0 if result.get("ok") else 1
-    # status 不依赖守护进程
     from .exec import Runner
+
     runner = Runner()
     caps = caps_mod.detect(runner, deep=False)
     controller = hotspot_controller(cfg, caps, runner)
+
+    if args.hotspot_action in ("start", "stop"):
+        result = controller.start() if args.hotspot_action == "start" else controller.stop()
+        if result.ok:
+            _print(_c(f"{'已开启' if args.hotspot_action == 'start' else '已关闭'}热点"
+                      f"（{result.command}）", "ok"))
+            _print(_c("提示：面板上的热点状态最多 10 秒后刷新。", "dim"))
+            return 0
+        _print(_c(f"{'开启' if args.hotspot_action == 'start' else '关闭'}热点失败", "bad"))
+        if result.reason:
+            _print(f"  原因：{result.reason}")
+        for line in controller.guidance():
+            _print(f"  • {line}")
+        return 1
+
     state = controller.status()
     _print(_kv_table([
         ("状态", {"on": _badge("ok", "已开启"), "off": "已关闭",

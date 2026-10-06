@@ -42,7 +42,40 @@
 
 ---
 
-## 安装
+## 一条命令装好并跑起来
+
+**有 root 的设备**，在 Termux 原生 shell 里粘这一条（会装依赖 → 拉代码 → 安装 → 尽力开热点 → 启动 → 打印面板链接）：
+
+```bash
+pkg install -y git python tsu && \
+git clone --depth 1 https://github.com/zhuzijiang/termux-router.git ~/termux-router && \
+bash ~/termux-router/bootstrap.sh
+```
+
+`bootstrap.sh` 会做 8 件事，并且**每一步都告诉你结果**：
+
+1. 确认是 Termux 原生环境（PRoot 里直接拒绝，并解释为什么）
+2. `pkg install` 只装缺的依赖
+3. 拉取或更新代码
+4. 安装 `trm` 命令、生成配置
+5. 检查 root 是否**真的**可用（`sudo id` 必须成功）
+6. 尝试用命令打开热点；失败就提示你手动开，并**轮询等你最多 90 秒**
+7. `sudo trm up -d` 启动（NAT + DHCP/DNS + 面板）
+8. 打印状态和**免密面板链接**（可以直接发到电脑上打开）
+
+想先看它要干什么、什么都不执行：
+
+```bash
+bash ~/termux-router/bootstrap.sh --dry-run
+```
+
+> 如果第 6 步你没开热点，脚本会以退出码 2 结束并提示你「开好热点后执行 `sudo trm up -d`」——
+> 这是刻意的，因为**给不存在的接口下发 iptables 规则会成功但永远不生效**，
+> 那种"规则都在却不通"的状态比直接报错难查得多。
+
+---
+
+## 安装（分步版）
 
 ### 在另一台手机上直接拉取
 
