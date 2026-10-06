@@ -643,6 +643,19 @@ document.addEventListener("visibilitychange", function(){
 });
 
 (function boot(){
+  // 支持 http://127.0.0.1:8080/?token=xxx 直接进入面板。
+  // 手机上点一下链接就登录，比手动复制粘贴令牌方便得多。
+  try {
+    var fromUrl = new URLSearchParams(window.location.search).get("token");
+    if (fromUrl){
+      localStorage.setItem(TOKEN_KEY, fromUrl.trim());
+      // 立刻把令牌从地址栏抹掉：否则它会留在浏览历史里，截屏也会带出去
+      if (window.history && window.history.replaceState){
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  } catch (e) { /* 老浏览器不支持 URLSearchParams 就退回手动输入 */ }
+
   if (!token()){ showLogin(""); } else { refresh(); }
   api("/api/ping").catch(function(){});
 })();
