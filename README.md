@@ -304,10 +304,16 @@ os.getuid()            # PRoot 里返回 0    ← 假的
 ## 开发与测试
 
 ```bash
-python3 run_tests.py          # 202 个测试，约 5 秒，不联网、不需要 root
+python3 run_tests.py          # 213 个测试，约 5 秒，不联网、不需要 root
 python3 run_tests.py -v       # 详细输出
 python3 run_tests.py dhcp     # 只跑 DHCP 相关
+
+python3 scripts/check_no_deps.py   # 守住"零第三方依赖"这条底线
 ```
+
+`check_no_deps.py` 会解析真实 import 并检查来源是否落在 site-packages 里，
+而且它**自己也有测试**（包括"故意写一个坏 import，检查器必须报出来"的反向验证）——
+一个永远通过的检查等于没有检查。
 
 测试不需要 root、不需要 iptables、不需要网络，因为：
 

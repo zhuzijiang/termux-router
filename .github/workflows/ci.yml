@@ -32,40 +32,7 @@ jobs:
         run: python -m unittest discover -s tests -t . -v
 
       - name: 确认没有第三方依赖
-        run: |
-          # 本项目的核心承诺是"零依赖"：源码里不允许出现 import 第三方包。
-          python - <<'PY'
-          import ast, os, pathlib, sys, sysconfig
-
-          stdlib_dir = sysconfig.get_paths()["stdlib"]
-
-          def is_stdlib(name: str) -> bool:
-              # 不用 sys.stdlib_module_names（Python 3.10+ 才有），
-              # 直接看标准库目录里有没有这个模块/包，3.8+ 通用。
-              if name in sys.builtin_module_names:
-                  return True
-              return (os.path.isfile(os.path.join(stdlib_dir, name + ".py"))
-                      or os.path.isdir(os.path.join(stdlib_dir, name)))
-
-          local = {"trm", "tests"}
-          offenders = []
-          for path in pathlib.Path("trm").rglob("*.py"):
-              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-              for node in ast.walk(tree):
-                  names = []
-                  if isinstance(node, ast.Import):
-                      names = [a.name.split(".")[0] for a in node.names]
-                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                      names = [node.module.split(".")[0]]
-                  for name in names:
-                      if name not in local and not is_stdlib(name):
-                          offenders.append(f"{path}: {name}")
-          if offenders:
-              print("发现第三方依赖（违反零依赖原则）:")
-              print("\n".join(offenders))
-              raise SystemExit(1)
-          print(f"零第三方依赖检查通过（Python {sys.version.split()[0]}）")
-          PY
+        run: python scripts/check_no_deps.py trm
 
   shellcheck:
     name: shell 脚本检查
